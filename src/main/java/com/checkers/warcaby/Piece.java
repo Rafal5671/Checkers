@@ -6,20 +6,24 @@ import javafx.scene.layout.GridPane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
+import javafx.scene.shape.Rectangle;
 
 public class Piece extends StackPane {
     private static final int BOARD_SIZE = 8;
     private static final int TILE_SIZE = 80;
     private static final Color RED_COLOR = Color.RED;
     private static final Color BLACK_COLOR = Color.BLACK;
-
+    private boolean isKing;
     private PieceType type;
-    private GridPane board;
-    private int currentRow;
-    private int currentCol;
-    private Piece[][] pieces;
+    public GridPane board;
+    public int currentRow;
+    public int currentCol;
+    public Piece[][] pieces;
+    private Circle circle;
+    private Rectangle kingCrown;
 
-    private boolean isSelected = false;
+
+    public boolean isSelected = false;
 
     public Piece(PieceType type, int row, int col, Piece[][] pieces, GridPane board) {
         this.type = type;
@@ -27,6 +31,7 @@ public class Piece extends StackPane {
         this.currentCol = col;
         this.pieces = pieces;
         this.board = board;
+        this.isKing = false;
 
         Circle circle = new Circle(TILE_SIZE * 0.3);
         circle.setFill(type == PieceType.RED ? RED_COLOR : BLACK_COLOR);
@@ -34,6 +39,12 @@ public class Piece extends StackPane {
         circle.setStrokeWidth(TILE_SIZE * 0.03);
 
         getChildren().add(circle);
+        kingCrown = new Rectangle(TILE_SIZE * 0.3, TILE_SIZE * 0.15);
+        kingCrown.setFill(Color.GOLD);
+        kingCrown.setTranslateY(-TILE_SIZE * 0.15);
+        kingCrown.setVisible(false);
+
+        getChildren().add(kingCrown);
 
         setOnMouseClicked(this::handleMouseClicked);
     }
@@ -52,24 +63,76 @@ public class Piece extends StackPane {
             deselectPiece();
         }
     }
+    public void promoteToKing() {
+        isKing = true;
+        kingCrown.setVisible(true);
+    }
+
 
     private void selectPiece() {
 
         // Highlight the selected piece
         setStyle("-fx-border-color: yellow; -fx-border-width: 3px;");
         isSelected = true;
-
-        // Highlight valid moves
-        for (int row = 0; row < pieces.length; row++) {
-            for (int col = 0; col < pieces[row].length; col++) {
-                if (isValidMove(row, col)) {
-                    Tile tile = getTileAt(row, col);
-                    tile.highlight();
-                    tile.setOnMouseClicked(this::handleMoveClick);
+        System.out.println(currentCol);
+        System.out.println(currentRow);
+        if (hasAvailableCapture()) {
+            for (int row = 0; row < pieces.length; row++) {
+                for (int col = 0; col < pieces[row].length; col++) {
+                    if (isValidCaptureMove(row, col)) {
+                        Tile tile = getTileAt(row, col);
+                        tile.highlight();
+                        tile.setOnMouseClicked(this::handleCaptureMoveClick);
+                    }
+                }
+            }
+        }
+        // If there are no capture moves, highlight regular moves
+        else {
+            for (int row = 0; row < pieces.length; row++) {
+                for (int col = 0; col < pieces[row].length; col++) {
+                    if (isValidMove(row, col)) {
+                        Tile tile = getTileAt(row, col);
+                        tile.highlight();
+                        tile.setOnMouseClicked(this::handleMoveClick);
+                    }
                 }
             }
         }
     }
+    private boolean isValidCaptureMove(int newRow, int newCol) {
+        // Sprawdzenie, czy docelowe pole jest puste
+        if (pieces[newRow][newCol] == null) {
+            // Sprawdzenie, czy to bicie jest wykonywane
+            if (Math.abs(newRow - currentRow) == 2 && Math.abs(newCol - currentCol) == 2) {
+                int opponentRow = currentRow + (newRow - currentRow) / 2;
+                int opponentCol = currentCol + (newCol - currentCol) / 2;
+
+                // Sprawdzenie, czy istnieje przeciwnik na środkowym polu
+                if (pieces[opponentRow][opponentCol] != null && pieces[opponentRow][opponentCol].getType() != type) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+    public void handleCaptureMoveClick(MouseEvent event) {
+        Tile clickedTile = (Tile) event.getSource();
+        int clickedRow = GridPane.getRowIndex(clickedTile);
+        int clickedCol = GridPane.getColumnIndex(clickedTile);
+
+        if (isValidCaptureMove(clickedRow, clickedCol)) {
+            movePiece(clickedRow, clickedCol);
+            // Check if there are any additional capture moves available
+            if (hasAvailableCapture()) {
+                selectPiece();
+            } else {
+                deselectPiece();
+            }
+        }
+    }
+
 
     private void deselectPiece() {
         // Deselect the piece
@@ -93,9 +156,17 @@ public class Piece extends StackPane {
 
         if (isValidMove(clickedRow, clickedCol)) {
             movePiece(clickedRow, clickedCol);
-        }
 
-        deselectPiece();
+            // Check if there are additional capture moves available for a king
+            if (isKing && hasAvailableCapture()) {
+                // Remain in the piece selection mode and continue the game
+                selectPiece();
+            } else {
+                deselectPiece();
+            }
+        } else {
+            deselectPiece();
+        }
     }
 
     private void movePiece(int newRow, int newCol) {
@@ -125,6 +196,12 @@ public class Piece extends StackPane {
         // Update the piece's currentRow and currentCol
         currentRow = newRow;
         currentCol = newCol;
+        if (shouldPromoteToKing(newRow)) {
+            promoteToKing();
+        }
+    }
+    private boolean shouldPromoteToKing(int newRow) {
+        return (type == PieceType.BLACK && newRow == 0) || (type == PieceType.RED && newRow == BOARD_SIZE - 1);
     }
 
 
@@ -146,6 +223,24 @@ public class Piece extends StackPane {
             }
             // Jeśli nie ma dostępnego bicia, ruch bez bicia jest dozwolony
             else {
+                // Sprawdzenie, czy damka porusza się po całej diagonali
+                if (isKing) {
+                    int rowDiff = Math.abs(newRow - currentRow);
+                    int colDiff = Math.abs(newCol - currentCol);
+                    if (rowDiff == colDiff) {
+                        return true;
+                    }
+                }
+                // Pionki RED mogą poruszać się tylko do przodu (zmniejszanie wartości wiersza)
+                else if (type == PieceType.RED && newRow < currentRow) {
+                    return false;
+                }
+                // Pionki BLACK mogą poruszać się tylko do przodu (zwiększanie wartości wiersza)
+                else if (type == PieceType.BLACK && newRow > currentRow) {
+                    return false;
+                }
+
+                // Dozwolony jest tylko ruch o jedno pole na ukos
                 if (Math.abs(newRow - currentRow) == 1 && Math.abs(newCol - currentCol) == 1) {
                     return true;
                 }
@@ -154,6 +249,8 @@ public class Piece extends StackPane {
 
         return false;
     }
+
+
 
     private boolean hasAvailableCapture() {
         for (int row = 0; row < BOARD_SIZE; row++) {
@@ -200,7 +297,7 @@ public class Piece extends StackPane {
     }
 
 
-    private Tile getTileAt(int row, int col) {
+    public Tile getTileAt(int row, int col) {
         // Helper method to get the Tile at a specific position on the board
         for (Node node : board.getChildren()) {
             if (node instanceof Tile && GridPane.getRowIndex(node) == row && GridPane.getColumnIndex(node) == col) {
